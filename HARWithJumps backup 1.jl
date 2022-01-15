@@ -6,13 +6,18 @@ using InteractiveUtils
 
 # ╔═╡ 5731d104-6d78-11ec-081d-d1361006efa4
 begin
-    using DataFrames
-    using CSV
-    using Dates
-    using StatsPlots
-    using Turing
-	using LinearAlgebra
-	using Statistics
+	using DataFrames
+	using CSV
+	using Dates
+	using StatsPlots
+	using Turing
+end
+
+# ╔═╡ a42f91a5-2827-44e3-a0b2-962d633bcd79
+begin
+	SPX = DataFrame(CSV.File("./SPX_1min.csv", header=["date", "open", "high", "low", "close", "volume"]))
+	SPX[!, :date] = Date.(SPX[!, :date], dateformat"y-m-d H:M:S")
+	SPX = SPX[!, [:date, :close]]
 end
 
 # ╔═╡ 790a6f50-a48b-4968-b18c-b221acc66a98
@@ -30,7 +35,7 @@ r_t = \\ln(P_t) - \\ln(P_{t-1})
 Where prices for that day are indexed ``P_1, P_2, ..., P_T``
 """
 function CalcRV(prices::AbstractVector{<:Number})
-    return sum((log.(prices[2:end]) - log.(prices[1:end-1])) .^ 2)
+	return sum((log.(prices[2:end]) - log.(prices[1:end-1])).^2)
 end
 
 # ╔═╡ d8cd6539-6095-4482-b78c-2d0048affaad
@@ -48,8 +53,15 @@ r_t = \\ln(P_t) - \\ln(P_{t-1})
 Where prices for that day are indexed ``P_1, P_2, ..., P_T``
 """
 function CalcBV(prices::AbstractVector{<:Number})
-    log_ret = log.(prices[2:end]) - log.(prices[1:end-1])
-    return sum(abs.(log_ret[2:end]) .* abs.(log_ret[1:end-1]))
+	log_ret = log.(prices[2:end]) - log.(prices[1:end-1])
+	return sum(abs.(log_ret[2:end]) .* abs.(log_ret[1:end-1]))
+end
+
+# ╔═╡ 9dbb8d20-1b87-414f-9d96-9ae5e63af47b
+begin
+	SPXGrouped = groupby(SPX, :date)
+	RV = combine(SPXGrouped, :close => CalcRV => :RV)
+	BV = combine(SPXGrouped, :close => CalcBV => :BV)
 end
 
 # ╔═╡ 464b7d9e-96a7-4e3d-8627-0a789211e717
@@ -64,109 +76,49 @@ length n
 ```
 """
 function MA(vec::AbstractVector{<:Number}, n::Int)
-    result = Float64[]
-    for t in (n+1):length(vec)
-        push!(result, (1 / n) * sum(vec[t-n:t]))
-    end
-    return result
+	result = Float64[]
+	for t in (n+1):length(vec)
+		push!(result, (1/n) * sum(vec[t-n:t]))
+	end
+	return result
 end
 
-# ╔═╡ a42f91a5-2827-44e3-a0b2-962d633bcd79
+# ╔═╡ 5adfa856-ae7c-4901-87c9-c5033b01d677
 begin
-    SPX = DataFrame(CSV.File("./data/SPX_1min.csv", header = ["date", "open", "high", "low", "close", "volume"]))
-    SPX[!, :date] = Date.(SPX[!, :date], dateformat"y-m-d H:M:S")
-    SPX = SPX[!, [:date, :close]]
+	RV_5 = DataFrame(date=RV[6:end, :date], RV_5=MA(RV[!, :RV], 5))
+	RV_21 = DataFrame(date=RV[22:end, :date], RV_21=MA(RV[!, :RV], 21))
+	# Volatility from 1 period ahead. t+1. Prediction target
+	RV_ahead = DataFrame(date=RV[1:end-1, :date], RV_ahead=RV[2:end, :RV])
+	data = innerjoin(RV_ahead, RV, RV_5, RV_21, on=:date)
 
-    SPXGrouped = groupby(SPX, :date)
-    RV = combine(SPXGrouped, :close => CalcRV => :RV)
-    BV = combine(SPXGrouped, :close => CalcBV => :BV)
-
-    RV_5 = DataFrame(date = RV[6:end, :date], RV_5 = MA(RV[!, :RV], 5))
-    RV_21 = DataFrame(date = RV[22:end, :date], RV_21 = MA(RV[!, :RV], 21))
-    # Volatility from 1 period ahead. t+1. Prediction target
-    RV_ahead = DataFrame(date = RV[1:end-1, :date], RV_ahead = RV[2:end, :RV])
-    data = innerjoin(RV_ahead, RV, RV_5, RV_21, on = :date)
-
-    train_index = round(Int, nrow(data) * 0.70)
-    train = data[1:train_index-1, :]
-    test = data[train_index:end, :]
+	train_index = round(Int, nrow(data) * 0.70)
+	train = data[1:train_index-1, :]
+	test = data[train_index:end, :]
 end
-
-# ╔═╡ 23d93a8c-8ec8-40d2-849f-49c4d953ce8b
-md"""
-# Baseline HAR Model
-"""
 
 # ╔═╡ 6eddbc70-57ec-4be9-9266-26843240aa4c
-@model function HAR(x, y, oos_x, oos_y)
-    α ~ Normal(0, 5)
-    ρ ~ truncated(Normal(0, 100), 0, Inf)
-    β ~ MvNormal(size(x, 2), sqrt(ρ))
-    σ ~ truncated(Normal(0, 100), 0, Inf)
-    y ~ MvNormal(α .+ x * β, sqrt(σ))
-
-	lpd = logpdf(MvNormal(α .+ oos_x * β, sqrt(σ)), oos_y)
-	pp = rand(MvNormal(α .+ oos_x * β, sqrt(σ)))
-	return (lpd, pp)
+@model function HAR(x, y)
+	α ~ Normal(0, 5)
+	ρ ~ truncated(Normal(0, 100), 0, Inf)
+	β ~ MvNormal(size(x, 2), sqrt(ρ))
+	σ ~ truncated(Normal(0, 100), 0, Inf)
+	y ~ MvNormal(α .+ x * β, sqrt(σ))
 end
 
 # ╔═╡ e9fc08c7-3be6-4e9f-8c79-0f7ca7810c76
 begin
-    model = HAR(log.(Matrix(select(train, Not([:date, :RV_ahead])))), log.(train[!, :RV_ahead]), log.(Matrix(select(test, Not([:date, :RV_ahead])))), log.(test[!, :RV_ahead]))
-    chain = sample(model, NUTS(), 1000)
-
-	gq = generated_quantities(model, chain)
-	lpd = first.(gq)
-	# Convert vector of vectors into matrix
-	# sqrt and exp to transform into volatility
-	pp = sqrt.(exp.(reduce(hcat, last.(gq))))
+	model = HAR(log.(Matrix(select(train, Not([:date, :RV_ahead])))), log.(train[!, :RV_ahead]))
+	chain = sample(model, NUTS(), 1000)
 end
 
-# ╔═╡ 0c9c35ce-145e-44b0-8435-27d236dd651c
-begin
-	density(pp, legend=:none, color="blue", linewidth=0.1, linealpha=0.1)
-	density!(sqrt.(test[!, :RV_ahead]), color="black", linewidth=2.5)
-end
+# ╔═╡ e2a30d6c-4c43-4efd-a757-ff80b78e853c
+plot(chain)
 
-# ╔═╡ 99eaaad0-d9b7-47d3-a15c-3ce1fbc9f063
-begin
-	mean_plot = histogram(mean(pp, dims=1)[:], legend=:none, title="Mean")
-	vline!([mean(sqrt.(test[!, :RV_ahead]))], color="black", linewidth=5)
-	std_plot = histogram(std(pp, dims=1)[:], legend=:none, title="Standard Deviation")
-	vline!([std(sqrt.(test[!, :RV_ahead]))], color="black", linewidth=5)
-	skew_plot = histogram(mapslices(x -> skewness(x), pp, dims=1)[:], legend=:none, title="Skew")
-	vline!([skewness(sqrt.(test[!, :RV_ahead]))], color="black", linewidth=5)
-	kurt_plot = histogram(mapslices(x -> kurtosis(x), pp, dims=1)[:], legend=:none, title="Kurtosis")
-	vline!([kurtosis(sqrt.(test[!, :RV_ahead]))], color="black", linewidth=5)
+# ╔═╡ 642ab6de-cfc5-41c8-b626-4ca9edef24ca
+describe(chain)
 
-	plot(mean_plot, std_plot, skew_plot, kurt_plot)
-end
-
-# ╔═╡ e24ba66a-e814-4467-9cc9-99df2505ec54
-function ef(x, a)
-	Xs = sort(x)
-	n = length(x)
-	return searchsortedlast(Xs, a) / n
-end
-
-# ╔═╡ d8298ad6-1cd5-47d3-b955-7be6af3e0680
-begin
-	PIT = Vector{Float64}(undef, length(test[!, :RV_ahead]))
-	for (t, x) in enumerate(sqrt.(test[!, :RV_ahead]))
-		PIT[t] = ef(pp[t, :], x)
-	end
-end
-
-# ╔═╡ aa9b1e43-cb38-4721-8941-7e862d45d462
-begin
-	density(rand(Uniform(0, 1), (1000, 1000)), color="blue", linealpha=0.1, legend=:none)
-	density!(PIT, color="black", linewidth=3)
-end
-
-# ╔═╡ 89b71ccf-2530-401a-a544-873b6b79eecd
-md"""
-# HAR Model with Jumps
-"""
+# ╔═╡ 2619e48e-615c-4d00-b3c7-3b62b6cb1d24
+test2 = get_params(chain[200:end]).α
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -174,8 +126,6 @@ PLUTO_PROJECT_TOML_CONTENTS = """
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
-LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsPlots = "f3b207a7-027a-5e70-b257-86293d7955fd"
 Turing = "fce5fe82-541a-59a6-adf8-730c64b5f9a0"
 
@@ -218,9 +168,9 @@ version = "0.3.4"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra"]
-git-tree-sha1 = "af92965fb30777147966f58acb05da51c5616b5f"
+git-tree-sha1 = "9faf218ea18c51fcccaf956c8d39614c9d30fe8b"
 uuid = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
-version = "3.3.3"
+version = "3.3.2"
 
 [[deps.AdvancedHMC]]
 deps = ["ArgCheck", "DocStringExtensions", "InplaceOps", "LinearAlgebra", "Parameters", "ProgressMeter", "Random", "Requires", "Statistics", "StatsBase", "StatsFuns"]
@@ -283,9 +233,9 @@ version = "0.4.4"
 
 [[deps.BangBang]]
 deps = ["Compat", "ConstructionBase", "Future", "InitialValues", "LinearAlgebra", "Requires", "Setfield", "Tables", "ZygoteRules"]
-git-tree-sha1 = "a33794b483965bf49deaeec110378640609062b1"
+git-tree-sha1 = "95831c49cf801756a922e50641361e3b4476a782"
 uuid = "198e06fe-97b7-11e9-32a5-e1d131e6ad66"
-version = "0.3.34"
+version = "0.3.33"
 
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
@@ -357,9 +307,9 @@ version = "0.7.0"
 
 [[deps.ColorSchemes]]
 deps = ["ColorTypes", "Colors", "FixedPointNumbers", "Random"]
-git-tree-sha1 = "6b6f04f93710c71550ec7e16b650c1b9a612d0b6"
+git-tree-sha1 = "a851fec56cb73cfdf43762999ec72eff5b86882a"
 uuid = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
-version = "3.16.0"
+version = "3.15.0"
 
 [[deps.ColorTypes]]
 deps = ["FixedPointNumbers", "Random"]
@@ -579,9 +529,9 @@ version = "0.11.9"
 
 [[deps.FiniteDiff]]
 deps = ["ArrayInterface", "LinearAlgebra", "Requires", "SparseArrays", "StaticArrays"]
-git-tree-sha1 = "6eae72e9943d8992d14359c32aed5f892bda1569"
+git-tree-sha1 = "8b3c09b56acaf3c0e581c66638b85c8650ee9dca"
 uuid = "6a86dc24-6348-571c-b903-95158fe2bd41"
-version = "2.10.0"
+version = "2.8.1"
 
 [[deps.FixedPointNumbers]]
 deps = ["Statistics"]
@@ -636,16 +586,16 @@ uuid = "0656b61e-2033-5cc2-a64a-77c0f6c09b89"
 version = "3.3.5+1"
 
 [[deps.GR]]
-deps = ["Base64", "DelimitedFiles", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Pkg", "Printf", "Random", "RelocatableFolders", "Serialization", "Sockets", "Test", "UUIDs"]
-git-tree-sha1 = "4a740db447aae0fbeb3ee730de1afbb14ac798a1"
+deps = ["Base64", "DelimitedFiles", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Pkg", "Printf", "Random", "Serialization", "Sockets", "Test", "UUIDs"]
+git-tree-sha1 = "b9a93bcdf34618031891ee56aad94cfff0843753"
 uuid = "28b8d3ca-fb5f-59d9-8090-bfdbd6d07a71"
-version = "0.63.1"
+version = "0.63.0"
 
 [[deps.GR_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Cairo_jll", "FFMPEG_jll", "Fontconfig_jll", "GLFW_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pixman_jll", "Pkg", "Qt5Base_jll", "Zlib_jll", "libpng_jll"]
-git-tree-sha1 = "aa22e1ee9e722f1da183eb33370df4c1aeb6c2cd"
+git-tree-sha1 = "f97acd98255568c3c9b416c5a3cf246c1315771b"
 uuid = "d2c73de3-f751-5644-a686-071e5b155ba9"
-version = "0.63.1+0"
+version = "0.63.0+0"
 
 [[deps.GeometryBasics]]
 deps = ["EarCut_jll", "IterTools", "LinearAlgebra", "StaticArrays", "StructArrays", "Tables"]
@@ -695,9 +645,9 @@ uuid = "83e8ac13-25f8-5344-8a64-a9f2b223428f"
 version = "0.5.0"
 
 [[deps.InitialValues]]
-git-tree-sha1 = "4da0f88e9a39111c2fa3add390ab15f3a44f3ca3"
+git-tree-sha1 = "40c555f961d7ccf86d8ccd150b9eef379cbfa0a3"
 uuid = "22cec73e-a1b8-11e9-2c92-598750a2cf9c"
-version = "0.3.1"
+version = "0.3.0"
 
 [[deps.InlineStrings]]
 deps = ["Parsers"]
@@ -761,9 +711,9 @@ version = "1.0.0"
 
 [[deps.JLLWrappers]]
 deps = ["Preferences"]
-git-tree-sha1 = "22df5b96feef82434b07327e2d3c770a9b21e023"
+git-tree-sha1 = "642a199af8b68253517b80bd3bfd17eb4e84df6e"
 uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
-version = "1.4.0"
+version = "1.3.0"
 
 [[deps.JSON]]
 deps = ["Dates", "Mmap", "Parsers", "Unicode"]
@@ -963,10 +913,10 @@ uuid = "442fdcdd-2543-5da2-b0f3-8c86c306513e"
 version = "0.3.1"
 
 [[deps.MicroCollections]]
-deps = ["BangBang", "InitialValues", "Setfield"]
-git-tree-sha1 = "6bb7786e4f24d44b4e29df03c69add1b63d88f01"
+deps = ["BangBang", "Setfield"]
+git-tree-sha1 = "4f65bdbbe93475f6ff9ea6969b21532f88d359be"
 uuid = "128add7d-3638-4c79-886c-908ea0c25c34"
-version = "0.1.2"
+version = "0.1.1"
 
 [[deps.Missings]]
 deps = ["DataAPI"]
@@ -988,9 +938,9 @@ version = "0.8.0"
 
 [[deps.NNlib]]
 deps = ["Adapt", "ChainRulesCore", "Compat", "LinearAlgebra", "Pkg", "Requires", "Statistics"]
-git-tree-sha1 = "afcfd88042cc5a62743c98ca311668ff5c03148a"
+git-tree-sha1 = "2eb305b13eaed91d7da14269bf17ce6664bfee3d"
 uuid = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
-version = "0.7.32"
+version = "0.7.31"
 
 [[deps.NaNMath]]
 git-tree-sha1 = "f755f36b19a5116bb580de457cda0c140153f283"
@@ -1019,9 +969,9 @@ uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
 
 [[deps.NonlinearSolve]]
 deps = ["ArrayInterface", "FiniteDiff", "ForwardDiff", "IterativeSolvers", "LinearAlgebra", "RecursiveArrayTools", "RecursiveFactorization", "Reexport", "SciMLBase", "Setfield", "StaticArrays", "UnPack"]
-git-tree-sha1 = "200321809e94ba9eb70e7d7c3de8a7a6679a18b3"
+git-tree-sha1 = "8dc3be3e9edf976a3e79363b3bd2ad776a627c31"
 uuid = "8913a72c-1f9b-4ce2-8d82-65094dcecaec"
-version = "0.3.13"
+version = "0.3.12"
 
 [[deps.Observables]]
 git-tree-sha1 = "fe29afdef3d0c4a8286128d4e45cc50621b1e43d"
@@ -1036,9 +986,9 @@ version = "1.10.8"
 
 [[deps.Ogg_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "887579a3eb005446d514ab7aeac5d1d027658b8f"
+git-tree-sha1 = "7937eda4681660b4d6aeeecc2f7e1c81c8ee4e2f"
 uuid = "e7412a2a-1a6e-54c0-be00-318e2571c051"
-version = "1.3.5+1"
+version = "1.3.5+0"
 
 [[deps.OpenBLAS_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
@@ -1046,9 +996,9 @@ uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
 
 [[deps.OpenSSL_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "648107615c15d4e09f7eca16307bc821c1f718d8"
+git-tree-sha1 = "15003dcb7d8db3c6c857fda14891a539a8f2705a"
 uuid = "458c3c95-2e84-50aa-8efc-19380b2a3a95"
-version = "1.1.13+0"
+version = "1.1.10+0"
 
 [[deps.OpenSpecFun_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Pkg"]
@@ -1115,9 +1065,9 @@ version = "1.1.2"
 
 [[deps.Plots]]
 deps = ["Base64", "Contour", "Dates", "Downloads", "FFMPEG", "FixedPointNumbers", "GR", "GeometryBasics", "JSON", "Latexify", "LinearAlgebra", "Measures", "NaNMath", "PlotThemes", "PlotUtils", "Printf", "REPL", "Random", "RecipesBase", "RecipesPipeline", "Reexport", "Requires", "Scratch", "Showoff", "SparseArrays", "Statistics", "StatsBase", "UUIDs", "UnicodeFun", "Unzip"]
-git-tree-sha1 = "68e602f447344154f3b80f7d14bfb459a0f4dadf"
+git-tree-sha1 = "71d65e9242935132e71c4fbf084451579491166a"
 uuid = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
-version = "1.25.5"
+version = "1.25.4"
 
 [[deps.PooledArrays]]
 deps = ["DataAPI", "Future"]
@@ -1213,17 +1163,11 @@ git-tree-sha1 = "7b1d07f411bc8ddb7977ec7f377b97b158514fe0"
 uuid = "189a3867-3050-52da-a836-e630ba90ab69"
 version = "0.2.0"
 
-[[deps.RelocatableFolders]]
-deps = ["SHA", "Scratch"]
-git-tree-sha1 = "cdbd3b1338c72ce29d9584fdbe9e9b70eeb5adca"
-uuid = "05181044-ff0b-4ac5-8273-598c1e38db00"
-version = "0.1.3"
-
 [[deps.Requires]]
 deps = ["UUIDs"]
-git-tree-sha1 = "838a3a4188e2ded87a4f9f184b4b0d78a1e91cb7"
+git-tree-sha1 = "8f82019e525f4d5c669692772a6f4b0a58b06a6a"
 uuid = "ae029012-a4dd-5104-9daa-d747884805df"
-version = "1.3.0"
+version = "1.2.0"
 
 [[deps.Rmath]]
 deps = ["Random", "Rmath_jll"]
@@ -1309,9 +1253,9 @@ version = "0.1.14"
 
 [[deps.StaticArrays]]
 deps = ["LinearAlgebra", "Random", "Statistics"]
-git-tree-sha1 = "2ae4fe21e97cd13efd857462c1869b73c9f61be3"
+git-tree-sha1 = "de9e88179b584ba9cf3cc5edbb7a41f26ce42cda"
 uuid = "90137ffa-7385-5640-81b9-e52037218182"
-version = "1.3.2"
+version = "1.3.0"
 
 [[deps.StatisticalTraits]]
 deps = ["ScientificTypesBase"]
@@ -1697,18 +1641,16 @@ version = "0.9.1+5"
 
 # ╔═╡ Cell order:
 # ╠═5731d104-6d78-11ec-081d-d1361006efa4
-# ╟─790a6f50-a48b-4968-b18c-b221acc66a98
-# ╟─d8cd6539-6095-4482-b78c-2d0048affaad
-# ╟─464b7d9e-96a7-4e3d-8627-0a789211e717
 # ╠═a42f91a5-2827-44e3-a0b2-962d633bcd79
-# ╟─23d93a8c-8ec8-40d2-849f-49c4d953ce8b
+# ╠═790a6f50-a48b-4968-b18c-b221acc66a98
+# ╠═d8cd6539-6095-4482-b78c-2d0048affaad
+# ╠═9dbb8d20-1b87-414f-9d96-9ae5e63af47b
+# ╠═464b7d9e-96a7-4e3d-8627-0a789211e717
+# ╠═5adfa856-ae7c-4901-87c9-c5033b01d677
 # ╠═6eddbc70-57ec-4be9-9266-26843240aa4c
 # ╠═e9fc08c7-3be6-4e9f-8c79-0f7ca7810c76
-# ╠═0c9c35ce-145e-44b0-8435-27d236dd651c
-# ╠═99eaaad0-d9b7-47d3-a15c-3ce1fbc9f063
-# ╠═e24ba66a-e814-4467-9cc9-99df2505ec54
-# ╠═d8298ad6-1cd5-47d3-b955-7be6af3e0680
-# ╠═aa9b1e43-cb38-4721-8941-7e862d45d462
-# ╟─89b71ccf-2530-401a-a544-873b6b79eecd
+# ╠═e2a30d6c-4c43-4efd-a757-ff80b78e853c
+# ╠═642ab6de-cfc5-41c8-b626-4ca9edef24ca
+# ╠═2619e48e-615c-4d00-b3c7-3b62b6cb1d24
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
