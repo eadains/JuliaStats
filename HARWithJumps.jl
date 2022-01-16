@@ -28,33 +28,21 @@ RV = \\sum_{t=2}^T r_t^2
 r_t = \\ln(P_t) - \\ln(P_{t-1})
 ```
 Where prices for that day are indexed ``P_1, P_2, ..., P_T``
+
+Equation 1 from:
+Barndorff-Nielsen, O. E. (2005). Econometrics of testing for jumps in financial economics using Bipower variation. Journal of Financial Econometrics, 4(1), 1–30. https://doi.org/10.1093/jjfinec/nbi022 
 """
 function CalcRV(prices::AbstractVector{<:Number})
-    return sum((log.(prices[2:end]) - log.(prices[1:end-1])) .^ 2)
-end
-
-# ╔═╡ d8cd6539-6095-4482-b78c-2d0048affaad
-"""
-	CalcBV(prices::AbstractVector{<:Number})
-
-Calculates bipower variation from prices vector for a single day:
-
-```math
-BV = \\sum_{t=3}^T |r_{t-1}||r_t|
-```
-```math
-r_t = \\ln(P_t) - \\ln(P_{t-1})
-```
-Where prices for that day are indexed ``P_1, P_2, ..., P_T``
-"""
-function CalcBV(prices::AbstractVector{<:Number})
-    log_ret = log.(prices[2:end]) - log.(prices[1:end-1])
-    return sum(abs.(log_ret[2:end]) .* abs.(log_ret[1:end-1]))
+	rv = 0
+	for t in 2:length(prices)
+		rv += (log(prices[t]) - log(prices[t-1]))^2
+	end
+	return rv
 end
 
 # ╔═╡ 464b7d9e-96a7-4e3d-8627-0a789211e717
 """
-	MA(vec::AbstractVector{<:Number}, n::Int)
+	MA(vec::AbstractVector{<:Number}, n::Integer)
 
 Computes the moving average of a given vector over rolling periods of
 length n
@@ -63,12 +51,12 @@ length n
 \\frac{1}{n} \\sum_{t-n}^t x_t
 ```
 """
-function MA(vec::AbstractVector{<:Number}, n::Int)
-    result = Float64[]
-    for t in (n+1):length(vec)
-        push!(result, (1 / n) * sum(vec[t-n:t]))
-    end
-    return result
+function MA(vec::AbstractVector{<:Number}, n::Integer)
+	ma = Vector{Float64}(undef, length(vec) - n)
+	for t in (n+1):length(vec)
+		ma[t-n] = mean(vec[t-n:t])
+	end
+	return ma
 end
 
 # ╔═╡ a42f91a5-2827-44e3-a0b2-962d633bcd79
@@ -79,8 +67,8 @@ begin
 
     SPXGrouped = groupby(SPX, :date)
     RV = combine(SPXGrouped, :close => CalcRV => :RV)
-    BV = combine(SPXGrouped, :close => CalcBV => :BV)
 
+    # TODO: Change to transform syntax
     RV_5 = DataFrame(date = RV[6:end, :date], RV_5 = MA(RV[!, :RV], 5))
     RV_21 = DataFrame(date = RV[22:end, :date], RV_21 = MA(RV[!, :RV], 21))
     # Volatility from 1 period ahead. t+1. Prediction target
@@ -99,9 +87,8 @@ md"""
 
 # ╔═╡ 6eddbc70-57ec-4be9-9266-26843240aa4c
 @model function HAR(x, y, oos_x, oos_y)
-    α ~ Normal(0, 5)
-    ρ ~ truncated(Normal(0, 100), 0, Inf)
-    β ~ MvNormal(size(x, 2), sqrt(ρ))
+    α ~ Normal(0, 5.0)
+    β ~ MvNormal(size(x, 2), 5.0)
     σ ~ truncated(Normal(0, 100), 0, Inf)
     y ~ MvNormal(α .+ x * β, sqrt(σ))
 
@@ -167,6 +154,97 @@ end
 md"""
 # HAR Model with Jumps
 """
+
+# ╔═╡ d8cd6539-6095-4482-b78c-2d0048affaad
+"""
+	CalcBV(prices::AbstractVector{<:Number})
+
+Calculates bipower variation from prices vector for a single day:
+
+```math
+BV = \\sum_{t=3}^T |r_{t-1}||r_t|
+```
+```math
+r_t = \\ln(P_t) - \\ln(P_{t-1})
+```
+Where prices for that day are indexed ``P_1, P_2, ..., P_T``
+
+Equation 4 from:
+Barndorff-Nielsen, O. E. (2005). Econometrics of testing for jumps in financial economics using Bipower variation. Journal of Financial Econometrics, 4(1), 1–30. https://doi.org/10.1093/jjfinec/nbi022 
+"""
+function CalcBV(prices::AbstractVector{<:Number})
+    bv = 0
+	for t in 3:length(prices)
+		r_t = log(prices[t]) - log(prices[t-1])
+		r_t1 = log(prices[t-1]) - log(prices[t-2])
+		bv += abs(r_t1) * abs(r_t)
+	end
+	return bv
+end
+
+# ╔═╡ ca4fda21-bd06-46a3-bb3c-b180b6b64e90
+"""
+    CalcQV(prices::AbstractVector{<:Number}, δ::Integer)
+
+Calculates quadpower variation from prices vector representing a single day
+
+```math
+QV = \\delta^{-1} \\sum_{t=5}^T |r_{t-3}||r_{t-2}||r_{t-1}||r_t|
+```
+```math
+r_t = \\ln(P_t) - \\ln(P_{t-1})
+```
+Where prices for that day are indexed ``P_1, P_2, ..., P_T`` and ``\\delta`` is the number of price observations in a single day. For example, using minute data ``\\delta \\approx 390``.
+
+Pg.9 from: Barndorff-Nielsen, O. E. (2005). Econometrics of testing for jumps in financial economics using Bipower variation. Journal of Financial Econometrics, 4(1), 1–30. https://doi.org/10.1093/jjfinec/nbi022
+"""
+function CalcQV(prices::AbstractVector{<:Number}, δ::Integer)
+	qv = 0
+	for t in 5:length(prices)
+		r_t = log(prices[t]) - log(prices[t-1])
+		r_t1 = log(prices[t-1]) - log(prices[t-2])
+		r_t2 = log(prices[t-2]) - log(prices[t-3])
+		r_t3 = log(prices[t-3]) - log(prices[t-4])
+		qv += abs(r_t) * abs(r_t1) * abs(r_t2) * abs(r_t3)
+	end
+	return δ * qv
+end
+
+# ╔═╡ 829a163b-ecc8-4c5b-8b93-bafc0da2702b
+"""
+    JumpStatistic(δ::Integer, RV::Real, BV::Real, QV::Real)
+
+Calculates the ratio jump test statistic
+```math
+\\hat J = \\frac{\\delta^{1/2}}{\\sqrt{\\theta max(1, \\hat q / \\tilde v^2)}} (\\frac{\\mu^{-2} \\tilde v}{\\hat v} - 1)
+```
+Where ``\\delta`` is the number of price observations in a day, ``\\theta = \\frac{\\pi^2}{4} + \\pi - 5``, ``\\hat q`` is quadpower variation, ``\\tilde v`` is bipower variation, and ``\\hat v`` is realized variation. This test statistic is asymptotically distributed according to a standard Normal.
+
+See equation 14 in: Barndorff-Nielsen, O. E. (2005). Econometrics of testing for jumps in financial economics using Bipower variation. Journal of Financial Econometrics, 4(1), 1–30. https://doi.org/10.1093/jjfinec/nbi022
+"""
+function JumpStatistic(δ::Integer, RV::Real, BV::Real, QV::Real)
+	θ = π^2/4 + π - 5
+	μ = √2/√π
+	return (√δ/√(θ*max(1, QV/BV^2))) * (μ^-2 * BV/RV - 1)
+end
+
+# ╔═╡ c8a731fc-66cb-46aa-8aa0-26212e7842c0
+begin
+	vols = combine(SPXGrouped, :close => CalcRV => :RV, :close => CalcBV => :BV, :close => (x -> CalcQV(x, 390)) => :QV)
+	# Calculate jump statistic for each row, then see if it falls below
+	# 0.01 quantile of a standard normal, indicating a one-sided confidence
+	# of 99.9%
+	transform!(vols, [:RV, :BV, :QV] => ByRow((x,y,z) -> JumpStatistic(390, x, y, z) <= quantile(Normal(0, 1), 0.01)) => :jump)
+	# Jump magnitude on days where there is a jump
+	transform!(vols, [:RV, :BV, :jump] => ByRow((rv,bv,j) -> j ? rv-bv : 0) => :magnitude)
+	# Seperate out continuous variation component. Equal to RV on days without
+	# jump and equal to BV on days with a jump
+	transform!(vols, [:RV, :BV, :jump] => ByRow((rv,bv,j) -> j ? bv : rv) => :RV_C)
+end
+
+# ╔═╡ 334cdf3f-0191-4ff7-a0bf-ace7cf2fd151
+@model function HARJumps(x, y)
+	
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1698,7 +1776,6 @@ version = "0.9.1+5"
 # ╔═╡ Cell order:
 # ╠═5731d104-6d78-11ec-081d-d1361006efa4
 # ╟─790a6f50-a48b-4968-b18c-b221acc66a98
-# ╟─d8cd6539-6095-4482-b78c-2d0048affaad
 # ╟─464b7d9e-96a7-4e3d-8627-0a789211e717
 # ╠═a42f91a5-2827-44e3-a0b2-962d633bcd79
 # ╟─23d93a8c-8ec8-40d2-849f-49c4d953ce8b
@@ -1710,5 +1787,10 @@ version = "0.9.1+5"
 # ╠═d8298ad6-1cd5-47d3-b955-7be6af3e0680
 # ╠═aa9b1e43-cb38-4721-8941-7e862d45d462
 # ╟─89b71ccf-2530-401a-a544-873b6b79eecd
+# ╟─d8cd6539-6095-4482-b78c-2d0048affaad
+# ╟─ca4fda21-bd06-46a3-bb3c-b180b6b64e90
+# ╟─829a163b-ecc8-4c5b-8b93-bafc0da2702b
+# ╠═c8a731fc-66cb-46aa-8aa0-26212e7842c0
+# ╠═334cdf3f-0191-4ff7-a0bf-ace7cf2fd151
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
