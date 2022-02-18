@@ -12,22 +12,52 @@ end
 
 # ╔═╡ 1a1a61f5-eeec-4913-a385-6996f4af9d49
 function PoissonProcess(t, λ)
-	process_values = [1]
-	arrival_times = [rand(Exponential(1/λ))]
+	# Process starts at o
+	process = [0]
+	arrival_times = [0.0]
+	# Add events until next event happens past time t
 	while arrival_times[end] < t
-		arrival = rand(Exponential(1/λ))
-		append!(arrival_times, arrival_times[end] + arrival)
-		append!(process_values, process_values[end] + 1)
+		time = rand(Exponential(1/λ))
+		append!(arrival_times, arrival_times[end] + time)
+		append!(process, process[end] + 1)
 	end
 	# Want arrival times <t, so ignore the last one
-	return (process_values[begin:end-1], arrival_times[begin:end-1])
+	process = process[begin:end-1]
+	arrival_times = arrival_times[begin:end-1]
+	# Add endpoint for t
+	return (append!(arrival_times, t), append!(process, process[end]))
 end
 
 # ╔═╡ f26febac-c85d-47bd-b7a0-f17959ac34e6
-values, times = PoissonProcess(10, 2)
+let
+	times, values = PoissonProcess(10, 5)
+	plot(times, values, linetype=:steppost, title="Poisson Process Path", legend=:none, xlabel="Time", ylabel="Cumulative Events Count", xlims=[0,10])
+end
 
-# ╔═╡ f39fcd3d-a582-4478-b869-4900f69802c9
-plot(times, values)
+# ╔═╡ 14c96e36-edd6-4828-a64b-58ad1d8bc0a8
+function BrownianMotion(t, points=100)
+	times = range(0, t, points)
+	values = []
+	for t in times
+		# Process starts at 0
+		if t == 0
+			append!(values, 0.0)
+		# Otherwise gaussian increment
+		else
+			append!(values, values[end] + rand(Normal(0, 1)))
+		end
+	end
+	return (times, values)
+end
+
+# ╔═╡ 6174be83-500a-41b2-916e-46c870354b9d
+let
+	times, values = BrownianMotion(100, 1000)
+	plot(times, values, title="Brownian Motion Path", xlabel="Time", ylabel="Value", legend=:none)
+end
+
+# ╔═╡ 38619d5d-4ad3-473b-8a38-f6806819d361
+
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1125,6 +1155,8 @@ version = "0.9.1+5"
 # ╠═c5138f0a-8eca-11ec-1edc-4137eccb500d
 # ╠═1a1a61f5-eeec-4913-a385-6996f4af9d49
 # ╠═f26febac-c85d-47bd-b7a0-f17959ac34e6
-# ╠═f39fcd3d-a582-4478-b869-4900f69802c9
+# ╠═14c96e36-edd6-4828-a64b-58ad1d8bc0a8
+# ╠═6174be83-500a-41b2-916e-46c870354b9d
+# ╠═38619d5d-4ad3-473b-8a38-f6806819d361
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
