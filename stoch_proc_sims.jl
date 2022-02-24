@@ -34,7 +34,14 @@ end
 # ╔═╡ 6174be83-500a-41b2-916e-46c870354b9d
 let
 	times, values = BrownianMotion(100, 1000)
-	plot(times, values, title="Brownian Motion Path", xlabel="Time", ylabel="Process Value", legend=:none)
+	plot(
+		times,
+		values,
+		title="Brownian Motion Path",
+		xlabel="Time",
+		ylabel="Process Value",
+		legend=:none
+	)
 end
 
 # ╔═╡ d9ff7450-069f-42e7-a557-942611a633de
@@ -65,7 +72,16 @@ end
 let
 	t = 10
 	times, values = PoissonProcess(t, 5)
-	plot(times, values, linetype=:steppost, title="Poisson Process Path", legend=:none, xlabel="Time", ylabel="Cumulative Events Count", xlims=[0,t])
+	plot(
+		times,
+		values,
+		linetype=:steppost,
+		title="Poisson Process Path",
+		legend=:none,
+		xlabel="Time",
+		ylabel="Cumulative Events Count",
+		xlims=[0,t]
+	)
 end
 
 # ╔═╡ 38619d5d-4ad3-473b-8a38-f6806819d361
@@ -84,7 +100,16 @@ end
 let
 	t = 10
 	times, values = PoissonProcess2(t, 5)
-	plot(times, values, linetype=:steppost, title="Poisson Process Path", legend=:none, xlabel="Time", ylabel="Cumulative Events Count", xlims=[0,t])
+	plot(
+		times,
+		values,
+		linetype=:steppost,
+		title="Poisson Process Path",
+		legend=:none,
+		xlabel="Time",
+		ylabel="Cumulative Events Count",
+		xlims=[0,t]
+	)
 end
 
 # ╔═╡ 4353b1bd-4f25-413d-81ef-6a4aec05b28f
@@ -110,20 +135,94 @@ function InhomogeneousPoissonProcess(t, λₜ::Function, λᵤ)
 	return append!(arrival_times, t), append!(process, process[end])
 end
 
-# ╔═╡ 79e0834a-4f27-4a13-8116-8dbb2911b6df
-λ(t) = t < 5 ? 1 : 10
-
 # ╔═╡ ee722f88-9c42-4b69-9a47-41e1fa6d1c00
-begin
+let
 	t = 10
+	λ(t) = t < 5 ? 1 : 10
 	times, values = InhomogeneousPoissonProcess(t, λ, 10)
-	plot(times, values, linetype=:steppost, title="Inhomogeneous Poisson Process Path", legend=:none, xlabel="Time", ylabel="Cumulative Events Count", xlims=[0,t])
+	plot(
+		times,
+		values,
+		linetype=:steppost,
+		title="Inhomogeneous Poisson Process Path",
+		legend=:none,
+		xlabel="Time",
+		ylabel="Cumulative Events Count",
+		xlims=[0,t]
+	)
 end
 
 # ╔═╡ aad03666-e261-4d82-bbf7-167da2d8ff0d
 md"""
 # Hawkes Process
 """
+
+# ╔═╡ 3dd68053-0047-4fed-8d6c-f6d031d06355
+# https://projecteuclid.org/journals/electronic-communications-in-probability/volume-18/issue-none/Exact-simulation-of-Hawkes-process-with-exponentially-decaying-intensity/10.1214/ECP.v18-2717.full
+# Algorithm 3.1
+function HawkesProcess(t, λ₀, a, δ)
+	N = [0]
+	T = [0.0]
+	λ = [λ₀]
+	while true
+		D = 1 + (δ * log(rand(Uniform(0, 1)))) / (λ[end] - a)
+		if D > 0
+			S₁ = -1/δ * log(D)
+			S₂ = -1/a * log(rand(Uniform(0, 1)))
+			time = T[end] + min(S₁, S₂)
+			if time > t
+				break
+			else
+				append!(T, time)
+				λₜ = (λ[end] - a) * exp(-δ * (T[end] - T[end-1])) + a
+				λₜ = λₜ + rand(Uniform(0, 2))
+				append!(λ, λₜ)
+				append!(N, N[end] + 1)
+			end
+		elseif D < 0
+			S₂ = -1/a * log(rand(Uniform(0, 1)))
+			time = T[end] + S₂
+			if time > t
+				break
+			else
+				append!(T, time)
+				λₜ = (λ[end] - a) * exp(-δ * (T[end] - T[end-1])) + a
+				λₜ = λₜ + rand(Uniform(0, 2))
+				append!(λ, λₜ)
+				append!(N, N[end] + 1)
+			end
+		end
+	end
+	return T, N, λ
+end
+
+# ╔═╡ 21dde533-335f-4ed6-bc8b-7afaca266387
+let
+	t = 100
+	T, N, λ = HawkesProcess(t, 0.9, 0.9, 1.1)
+	plots = [
+		plot(
+			T,
+			N,
+			linetype=:steppost,
+			legend=:none,
+			title="Hawkes Process",
+			xlabel="Time",
+			ylabel="Event Count",
+			xlims=[0,t]
+		),
+		plot(
+			T,
+			λ,
+			legend=:none,
+			title="Intensity Process",
+			xlabel="Time",
+			ylabel="Value",
+			xlims=[0,t]
+		)
+	]
+	plot(plots..., layout=(2, 1))
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1228,8 +1327,9 @@ version = "0.9.1+5"
 # ╠═38619d5d-4ad3-473b-8a38-f6806819d361
 # ╠═77ff4c3c-67da-46b6-88f7-461837ff294c
 # ╠═4353b1bd-4f25-413d-81ef-6a4aec05b28f
-# ╠═79e0834a-4f27-4a13-8116-8dbb2911b6df
 # ╠═ee722f88-9c42-4b69-9a47-41e1fa6d1c00
 # ╟─aad03666-e261-4d82-bbf7-167da2d8ff0d
+# ╠═3dd68053-0047-4fed-8d6c-f6d031d06355
+# ╠═21dde533-335f-4ed6-bc8b-7afaca266387
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
