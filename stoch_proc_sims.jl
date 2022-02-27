@@ -10,14 +10,34 @@ begin
 	using Distributions
 end
 
+# ╔═╡ 648c371c-1241-43f6-be9c-e9acc5f9017b
+md"""
+Lately, I've been studying stochastic processes with the eventual goal of modeling stock price behavior with stochastic differential equations. So, in this post, I want to talk about basic stochastic processes and methods to simulate them. I find that jumping from the math language of stochastic processes to actual implementation is difficult, so I wanted to make this post.
+"""
+
 # ╔═╡ b80250a0-9652-4ecb-812c-43bb809b544b
 md"""
 # Brownian Motion
 """
 
+# ╔═╡ fb194559-9d69-41c1-a1e0-085e5f9a1f5d
+md"""
+The first, and arguably most basic stochastic process is the famous Brownian Motion (alternatively the Wiener Process). Mathematically, a Brownian Motion at time $t$, $B(t)$ is a stochastic process having the following properties:
+1. Independent increments: $B(t) - B(s)$ for $t>s$ is independent of the past, i.e. does not dependent on any value of $B(u)$ where $0 \le u \le s$
+2. Normal increments: $B(t) - B(s) \sim \mathcal{N}(0, t-s)$, that is, the difference in the process between two times is distrbuted normally with mean 0 and variance equal to the difference of the two times
+3. Continuity of paths: $B(t)$ with $t \ge 0$ are continuous functions of $t$
+
+Surpisingly, these three relatively simple properties allow us to derive a plethora of useful results.
+
+Most importantly, from property 2: $B(t) - B(0) \sim \mathcal{N}(0, t)$. This is relevant in a common finance application: converting volatility from annual to daily terms. The common formula is to divide the annual standard deviation by the square root of 252 (assuming a year is 252 trading days) to get the daily standard deviation. Let's see how that's true given we assume stock prices obey a Brownian Motion. Without loss of generality, assume $B(0) = 0$ (you can convert any process starting at another value to one starting at 0 by adding/subtracting a constant). Then we have $B(t) \sim \mathcal{N}(0, t)$ so $B(252t) \sim \mathcal{N}(0, 252t)$. This says that variance scales linearly with time, so the standard deviation scales with the square root of time. So, because the daily time frame is $\frac{1}{252}$ the size of an annual time frame, you divide the annual standard deviation by the square root of 252 to get the daily standard deviation. Similarly, a week is $\frac{1}{52}$ the length of a year, so divide by the square root of 52 to get the weekly standard deviation, and so on.
+
+### Simulation
+Below is a function that returns the values of a Brownian Motion from time $0$ to $T$. Brownian Motion is a continuous process, so we can only approximate it by simulation, thus the below is technically the discrete time version called a random walk. As the number of points goes to infinity, this converges to a true Brownian Motion. It starts the process at zero, and at each time adds the normal increment over the time interval with variance as the length of the time interval. You can see how this causes the simulated process to satisfy property 2 above. 
+"""
+
 # ╔═╡ 14c96e36-edd6-4828-a64b-58ad1d8bc0a8
-function BrownianMotion(t, points=100)
-	times = range(0, t, points)
+function BrownianMotion(T, points=100)
+	times = range(0, T, points)
 	values = []
 	for t in times
 		# Process starts at 0
@@ -25,10 +45,11 @@ function BrownianMotion(t, points=100)
 			append!(values, 0.0)
 		# Otherwise gaussian increment
 		else
-			append!(values, values[end] + rand(Normal(0, 1)))
+			# Variance of increments is the difference between time steps
+			append!(values, values[end] + rand(Normal(0, sqrt(T/points))))
 		end
 	end
-	return (times, values)
+	return times, values
 end
 
 # ╔═╡ 6174be83-500a-41b2-916e-46c870354b9d
@@ -39,10 +60,27 @@ let
 		values,
 		title="Brownian Motion Path",
 		xlabel="Time",
-		ylabel="Process Value",
+		ylabel="Value",
 		legend=:none
 	)
 end
+
+# ╔═╡ 4401c4af-ad54-40e4-b7de-c617486ebeb4
+md"""
+As a check, let's investigate the mean and variance of the simulated process. The process starts at zero so we expect $B(t) \sim \mathcal{N}(0, t)$ In this case $t=100$ so expect mean zero and variance 100.
+"""
+
+# ╔═╡ ad4bfd23-3dec-4e45-8021-1ca26bc99373
+let
+	# Extract last value from process in each sample
+	sims = [BrownianMotion(100, 100)[2][end] for i in 1:1000000]
+	mean(sims), var(sims)
+end
+
+# ╔═╡ 904c6e75-51cd-4019-ab32-d2f820a5e5b8
+md"""
+As you can see the mean is near zero and the variance is near 100.
+"""
 
 # ╔═╡ d9ff7450-069f-42e7-a557-942611a633de
 md"""
@@ -79,7 +117,7 @@ let
 		title="Poisson Process Path",
 		legend=:none,
 		xlabel="Time",
-		ylabel="Cumulative Events Count",
+		ylabel="Event Count",
 		xlims=[0,t]
 	)
 end
@@ -107,7 +145,7 @@ let
 		title="Poisson Process Path",
 		legend=:none,
 		xlabel="Time",
-		ylabel="Cumulative Events Count",
+		ylabel="Event Count",
 		xlims=[0,t]
 	)
 end
@@ -147,7 +185,7 @@ let
 		title="Inhomogeneous Poisson Process Path",
 		legend=:none,
 		xlabel="Time",
-		ylabel="Cumulative Events Count",
+		ylabel="Event Count",
 		xlims=[0,t]
 	)
 end
@@ -160,7 +198,7 @@ md"""
 # ╔═╡ 3dd68053-0047-4fed-8d6c-f6d031d06355
 # https://projecteuclid.org/journals/electronic-communications-in-probability/volume-18/issue-none/Exact-simulation-of-Hawkes-process-with-exponentially-decaying-intensity/10.1214/ECP.v18-2717.full
 # Algorithm 3.1
-function HawkesProcess(t, λ₀, a, δ)
+function HawkesProcess(t, λ₀, a, δ, J)
 	N = [0]
 	T = [0.0]
 	λ = [λ₀]
@@ -175,7 +213,7 @@ function HawkesProcess(t, λ₀, a, δ)
 			else
 				append!(T, time)
 				λₜ = (λ[end] - a) * exp(-δ * (T[end] - T[end-1])) + a
-				λₜ = λₜ + rand(Uniform(0, 2))
+				λₜ = λₜ + J
 				append!(λ, λₜ)
 				append!(N, N[end] + 1)
 			end
@@ -187,7 +225,7 @@ function HawkesProcess(t, λ₀, a, δ)
 			else
 				append!(T, time)
 				λₜ = (λ[end] - a) * exp(-δ * (T[end] - T[end-1])) + a
-				λₜ = λₜ + rand(Uniform(0, 2))
+				λₜ = λₜ + J
 				append!(λ, λₜ)
 				append!(N, N[end] + 1)
 			end
@@ -199,7 +237,7 @@ end
 # ╔═╡ 21dde533-335f-4ed6-bc8b-7afaca266387
 let
 	t = 100
-	T, N, λ = HawkesProcess(t, 0.9, 0.9, 1.1)
+	T, N, λ = HawkesProcess(t, 1.0, 1.0, 1, .8)
 	plots = [
 		plot(
 			T,
@@ -1317,10 +1355,15 @@ version = "0.9.1+5"
 """
 
 # ╔═╡ Cell order:
-# ╠═c5138f0a-8eca-11ec-1edc-4137eccb500d
+# ╟─648c371c-1241-43f6-be9c-e9acc5f9017b
 # ╟─b80250a0-9652-4ecb-812c-43bb809b544b
+# ╟─fb194559-9d69-41c1-a1e0-085e5f9a1f5d
+# ╠═c5138f0a-8eca-11ec-1edc-4137eccb500d
 # ╠═14c96e36-edd6-4828-a64b-58ad1d8bc0a8
 # ╠═6174be83-500a-41b2-916e-46c870354b9d
+# ╟─4401c4af-ad54-40e4-b7de-c617486ebeb4
+# ╠═ad4bfd23-3dec-4e45-8021-1ca26bc99373
+# ╟─904c6e75-51cd-4019-ab32-d2f820a5e5b8
 # ╟─d9ff7450-069f-42e7-a557-942611a633de
 # ╠═1a1a61f5-eeec-4913-a385-6996f4af9d49
 # ╠═f26febac-c85d-47bd-b7a0-f17959ac34e6
